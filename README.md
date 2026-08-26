@@ -1,0 +1,266 @@
+# Whisper small synthetic domain data
+
+这个目录用于模拟生成 Whisper small LoRA 微调前四步的数据：
+
+1. 写领域指令文本
+2. 用 TTS 批量合成语音
+3. 叠加 10/20 dB 噪声和简单混响
+4. 生成 `train/valid/test_domain` manifest
+5. 抽样 1000 条 AISHELL-1 通用中文语音
+
+## 目录
+
+```text
+commands.txt                 # 领域指令文本，每行 category<TAB>text
+requirements-synthetic.txt   # 只用于合成数据的依赖
+requirements-train.txt       # Whisper/LoRA 训练依赖
+scripts/generate_command_catalog.py  # 生成约 120 条高质量领域输入
+scripts/generate_tts.py      # TTS 合成
+scripts/augment_noise.py     # SNR 噪声增强
+scripts/build_manifest.py    # 生成训练/验证/测试 manifest
+scripts/prepare_aishell_sample.py    # 从 AISHELL-1 抽样通用中文语音
+scripts/train_whisper_lora.py        # LoRA 微调 Whisper small
+scripts/evaluate_whisper.py          # 微调前后评估
+scripts/merge_lora.py                # 可选：合并 LoRA adapter
+scripts/clean_generated_data.ps1     # 清理旧生成数据和训练输出
+data/noise/                  # 可选：放公开噪声 wav/flac/ogg
+data/tts/                    # TTS 干净音频输出
+data/augmented/              # 噪声增强音频输出
+data/manifests/              # jsonl 元数据和切分结果
+```
+
+## 安装依赖
+
+如果本地之前生成过旧数据，先清理：
+
+```powershell
+.\scripts\clean_generated_data.ps1
+.\scripts\clean_generated_data.ps1 -Force
+```
+
+在本目录执行：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements-synthetic.txt
+```
+
+服务器训练建议使用 Python 3.10 或 3.11。PyTorch 请按服务器 CUDA 版本从官网选择安装命令，例如：
+
+```powershell
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+然后安装其余训练依赖：
+
+```powershell
+pip install -r requirements-train.txt
+```
+
+如果服务器不能访问 Edge TTS，可以改用 Windows 本地 SAPI：
+
+```powershell
+python scripts/generate_tts.py --engine sapi --list-sapi-voices
+```
+
+## 1. 编辑指令
+
+默认方案是约 120 条领域输入，质量优先：
+
+```text
+command: 55
+qa: 45
+fallback: 10
+short: 10
+```
+
+重新生成：
+
+```powershell
+python scripts/generate_command_catalog.py
+```
+
+也可以手工修改 `commands.txt`。格式是：
+
+```text
+command	小飒小飒，帮我拿瓶可乐
+qa	小飒小飒，介绍Sage Robot One
+fallback	你听清楚了吗
+short	向左转
+```
+
+## 2. 生成 TTS
+
+推荐规模是 `120 条文本 × 3 个声音配置 = 360 条干净语音`。后面再叠加 10/20 dB 噪声，总领域数据是 `360 × 3 = 1080 条`。
+
+默认使用 Windows 本地 SAPI，不会把指令文本发到外部服务，但通常只有一个系统声音。可以用三个语速配置先跑通：
+
+```powershell
+python scripts/generate_tts.py --engine sapi --limit 3
+python scripts/generate_tts.py --engine sapi --profiles sapi_slow,auto,-10% sapi_normal,auto,+0% sapi_fast,auto,+10% --quiet --overwrite
+```
+
+如果你确认 `commands.txt` 可以发送给 Microsoft 在线 TTS 服务，可以使用 Edge TTS 三个人声配置，声音更自然：
+
+```powershell
+python scripts/generate_tts.py --engine edge --default-edge-profiles --limit 3
+python scripts/generate_tts.py --engine edge --default-edge-profiles --quiet --overwrite
+```
+
+查看本机可用 SAPI 声音：
+
+```powershell
+python scripts/generate_tts.py --engine sapi --list-sapi-voices
+```
+
+不要同时使用 `--voices 三个声音` 和 `--rates 三个语速`，那会变成 `120 × 3 × 3 × 3 = 3240` 条领域数据，而不是 1080 条。
+
+生成结果：
+
+```text
+data/tts/*.wav
+data/manifests/tts_metadata.jsonl
+```
+
+## 3. 叠加噪声
+
+可以先不放任何噪声文件，脚本会生成类似会场的合成噪声：
+
+```powershell
+python scripts/augment_noise.py
+```
+
+如果你后来下载了 DEMAND/MUSAN 等公开噪声，把 wav/flac/ogg 放进 `data/noise/`，脚本会自动混用真实噪声：
+
+```powershell
+python scripts/augment_noise.py --noise-dir data/noise
+```
+
+默认生成 10/20 dB 两档：
+
+```text
+data/augmented/*.wav
+data/manifests/augmented_metadata.jsonl
+```
+
+## 4. 生成 manifest
+
+```powershell
+python scripts/build_manifest.py
+```
+
+输出：
+
+```text
+data/manifests/train.jsonl
+data/manifests/valid.jsonl
+data/manifests/test_domain.jsonl
+data/manifests/test_domain_clean.jsonl
+data/manifests/test_domain_noisy.jsonl
+data/manifests/test_keywords.jsonl
+data/manifests/test_short.jsonl
+```
+
+切分按类别分层后再按 `source_id` 做，保证同一句指令的干净版和所有噪声增强版不会同时出现在训练集和测试集里。默认 `valid=10%`、`test=15%`，所以 120 条文本大约会切成：
+
+```text
+train：约 90 条唯一领域输入
+valid：约 12 条唯一领域输入
+test_domain：约 18 条唯一领域输入
+```
+
+`test_domain_clean` 和 `test_domain_noisy` 用来分别比较安静和噪声场景，`test_keywords` 用来重点看 “飒智”“小飒”“WAIC”“Sage Robot One”“Sage Dog” 等专名，`test_short` 用来看短指令。
+
+## 5. 审计数据集
+
+```powershell
+python scripts/audit_dataset.py --check-audio
+```
+
+## 6. 抽样 AISHELL-1
+
+把 AISHELL-1 解压到服务器后运行：
+
+```powershell
+python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split train --limit 1000 --out data/manifests/aishell_train_1000.jsonl
+python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split dev --limit 100 --out data/manifests/test_general_aishell_100.jsonl
+```
+
+输出：
+
+```text
+data/manifests/aishell_train_1000.jsonl
+data/manifests/test_general_aishell_100.jsonl
+```
+
+训练时建议混合：
+
+```text
+领域 train：约 80%
+AISHELL：约 20%
+```
+
+## 7. 微调前 baseline
+
+先跑原始 `openai/whisper-small`，保存一份 baseline：
+
+```powershell
+python scripts/evaluate_whisper.py --manifest data/manifests/test_domain_clean.jsonl --name base_domain_clean
+python scripts/evaluate_whisper.py --manifest data/manifests/test_domain_noisy.jsonl --name base_domain_noisy
+python scripts/evaluate_whisper.py --manifest data/manifests/test_keywords.jsonl --name base_keywords
+python scripts/evaluate_whisper.py --manifest data/manifests/test_short.jsonl --name base_short
+python scripts/evaluate_whisper.py --manifest data/manifests/test_general_aishell_100.jsonl --name base_general_aishell
+```
+
+## 8. LoRA 微调
+
+8GB 显存可以先用这个配置：
+
+```powershell
+python scripts/train_whisper_lora.py `
+  --train-manifest data/manifests/train.jsonl `
+  --valid-manifest data/manifests/valid.jsonl `
+  --aishell-manifest data/manifests/aishell_train_1000.jsonl `
+  --output-dir outputs/whisper-small-lora `
+  --per-device-train-batch-size 2 `
+  --gradient-accumulation-steps 8 `
+  --num-train-epochs 10 `
+  --learning-rate 1e-4 `
+  --fp16 `
+  --gradient-checkpointing
+```
+
+12GB 或 16GB 显存可以把 `--per-device-train-batch-size` 调到 4。
+
+## 9. 微调后评估
+
+```powershell
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_domain_clean.jsonl --name lora_domain_clean
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_domain_noisy.jsonl --name lora_domain_noisy
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_keywords.jsonl --name lora_keywords
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_short.jsonl --name lora_short
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_general_aishell_100.jsonl --name lora_general_aishell
+```
+
+重点看：
+
+```text
+CER 是否下降
+exact_match 是否上升
+keyword_recall/WAIC、keyword_recall/Sage Robot One、keyword_recall/Sage Dog 是否上升
+general_aishell 的 CER 是否明显变差
+```
+
+## 10. 合并 LoRA
+
+如果部署端不想单独加载 adapter，可以合并：
+
+```powershell
+python scripts/merge_lora.py --adapter outputs/whisper-small-lora --out-dir outputs/whisper-small-lora-merged
+```
+
+## 建议
+
+这套数据能先验证 LoRA 微调流程和专有名词适配，但真实上线前最好仍然录 50-100 条现场语音做最终验收。模拟数据负责快速起步，真实小样本负责兜底。

@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Generated synthetic audio and manifests. Keep ignored unless they were
+# regenerated for the current commands.txt and intentionally versioned.
+data/tts/
+data/augmented/
+data/manifests/
+
+# Optional local/public noise corpora. These can be large and should be copied
+# or downloaded on the training server when needed.
+data/noise/*
+!data/noise/.gitkeep
+
+# Whisper / Hugging Face / PEFT training outputs
+outputs/
+output/
+checkpoints/
+checkpoint-*/
+runs/
+logs/
+eval_outputs/
+wandb/
+tensorboard/
+lightning_logs/
+
+# Model artifacts and large ML files
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+*.gguf
+*.tflite
+*.h5
+
+# Dataset and audio blobs
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.m4a
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+
+# Hugging Face / dataset caches
+.cache/
+hf_cache/
+huggingface/
+datasets_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
