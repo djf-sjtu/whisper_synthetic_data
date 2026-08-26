@@ -8,6 +8,106 @@
 4. 生成 `train/valid/test_domain` manifest
 5. 抽样 1000 条 AISHELL-1 通用中文语音
 
+## 服务器手动执行版
+
+服务器上从空仓库开始，按这个顺序执行即可。先确认当前目录是仓库根目录：
+
+```powershell
+cd D:\your\path\whisper_synthetic_data
+```
+
+创建环境并安装依赖。PyTorch 的 CUDA 版本要按服务器实际情况改，下面以 CUDA 12.1 为例：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements-synthetic.txt
+pip install -r requirements-train.txt
+```
+
+验证 GPU：
+
+```powershell
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+```
+
+生成领域数据。首选 Edge TTS 三声音配置；它不需要登录，但会把 `commands.txt` 文本发送给 Microsoft 在线 TTS：
+
+```powershell
+python scripts/generate_command_catalog.py
+python scripts/generate_tts.py --engine edge --default-edge-profiles --quiet --overwrite
+python scripts/augment_noise.py
+python scripts/build_manifest.py
+python scripts/audit_dataset.py --check-audio
+```
+
+如果 Edge TTS 失败，就先用本地 SAPI 跑通流程：
+
+```powershell
+python scripts/generate_tts.py --engine sapi --profiles sapi_slow,auto,-10% sapi_normal,auto,+0% sapi_fast,auto,+10% --quiet --overwrite
+python scripts/augment_noise.py
+python scripts/build_manifest.py
+python scripts/audit_dataset.py --check-audio
+```
+
+领域数据生成后的合理数量大致是：
+
+```text
+data/tts：360 条 wav
+data/augmented：720 条 wav
+train：约 801 行
+valid：约 108 行
+test_domain：约 171 行
+```
+
+准备 AISHELL。建议准备 1000 条通用训练池和 100 条通用测试集，但首轮训练只从 1000 条里抽 250 条混入，避免 AISHELL 压过领域指令：
+
+```powershell
+python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split train --limit 1000 --out data/manifests/aishell_train_1000.jsonl
+python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split dev --limit 100 --out data/manifests/test_general_aishell_100.jsonl
+```
+
+先跑微调前 baseline：
+
+```powershell
+python scripts/evaluate_whisper.py --manifest data/manifests/test_domain_clean.jsonl --name base_domain_clean
+python scripts/evaluate_whisper.py --manifest data/manifests/test_domain_noisy.jsonl --name base_domain_noisy
+python scripts/evaluate_whisper.py --manifest data/manifests/test_keywords.jsonl --name base_keywords
+python scripts/evaluate_whisper.py --manifest data/manifests/test_short.jsonl --name base_short
+python scripts/evaluate_whisper.py --manifest data/manifests/test_general_aishell_100.jsonl --name base_general_aishell
+```
+
+开始 LoRA 微调，8GB 显存先用这版：
+
+```powershell
+python scripts/train_whisper_lora.py `
+  --train-manifest data/manifests/train.jsonl `
+  --valid-manifest data/manifests/valid.jsonl `
+  --aishell-manifest data/manifests/aishell_train_1000.jsonl `
+  --max-aishell-rows 250 `
+  --output-dir outputs/whisper-small-lora `
+  --per-device-train-batch-size 2 `
+  --gradient-accumulation-steps 8 `
+  --num-train-epochs 10 `
+  --learning-rate 1e-4 `
+  --fp16 `
+  --gradient-checkpointing
+```
+
+微调后复跑同一批测试：
+
+```powershell
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_domain_clean.jsonl --name lora_domain_clean
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_domain_noisy.jsonl --name lora_domain_noisy
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_keywords.jsonl --name lora_keywords
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_short.jsonl --name lora_short
+python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manifest data/manifests/test_general_aishell_100.jsonl --name lora_general_aishell
+```
+
+对比 `eval_outputs/*_summary.csv`。如果 `lora_keywords` 明显变好，同时 `lora_general_aishell` 没明显变差，这轮就算有效。
+
 ## 目录
 
 ```text
@@ -198,8 +298,8 @@ data/manifests/test_general_aishell_100.jsonl
 训练时建议混合：
 
 ```text
-领域 train：约 80%
-AISHELL：约 20%
+领域 train：约 75%-80%
+AISHELL：约 20%-25%
 ```
 
 ## 7. 微调前 baseline
@@ -223,6 +323,7 @@ python scripts/train_whisper_lora.py `
   --train-manifest data/manifests/train.jsonl `
   --valid-manifest data/manifests/valid.jsonl `
   --aishell-manifest data/manifests/aishell_train_1000.jsonl `
+  --max-aishell-rows 250 `
   --output-dir outputs/whisper-small-lora `
   --per-device-train-batch-size 2 `
   --gradient-accumulation-steps 8 `

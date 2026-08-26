@@ -114,7 +114,7 @@ def main():
     parser.add_argument("--train-manifest", type=Path, default=Path("data/manifests/train.jsonl"))
     parser.add_argument("--valid-manifest", type=Path, default=Path("data/manifests/valid.jsonl"))
     parser.add_argument("--aishell-manifest", type=Path)
-    parser.add_argument("--max-aishell-rows", type=int)
+    parser.add_argument("--max-aishell-rows", type=int, default=250)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/whisper-small-lora"))
     parser.add_argument("--language", default="chinese")
     parser.add_argument("--task", default="transcribe")
