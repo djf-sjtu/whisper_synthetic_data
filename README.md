@@ -33,12 +33,21 @@ pip install -r requirements-train.txt
 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-生成领域数据。首选 Edge TTS 三声音配置；它不需要登录，但会把 `commands.txt` 文本发送给 Microsoft 在线 TTS：
+本仓库已经包含一份由 Edge TTS 生成好的领域数据：
+
+```text
+data/tts_edge：360 条干净 wav
+data/augmented_edge：720 条 10/20dB 噪声增强 wav
+data/manifests：训练、验证、测试 jsonl
+```
+
+所以服务器上正常不用重新生成 TTS，安装依赖后可以直接从 “准备 AISHELL” 和 “微调前 baseline” 开始。
+
+如果以后改了 `commands.txt`，才需要重新生成领域数据。`commands.txt` 是人工策划的 120 条领域文本，正常不要运行旧生成脚本。Edge TTS 不需要登录，但会把 `commands.txt` 文本发送给 Microsoft 在线 TTS：
 
 ```powershell
-python scripts/generate_command_catalog.py
-python scripts/generate_tts.py --engine edge --default-edge-profiles --quiet --overwrite
-python scripts/augment_noise.py
+python scripts/generate_tts.py --engine edge --default-edge-profiles --out-dir data\tts_edge --metadata data\manifests\tts_metadata.jsonl --quiet --overwrite
+python scripts/augment_noise.py --input data\manifests\tts_metadata.jsonl --out-dir data\augmented_edge --metadata data\manifests\augmented_metadata.jsonl
 python scripts/build_manifest.py
 python scripts/audit_dataset.py --check-audio
 ```
@@ -55,10 +64,10 @@ python scripts/audit_dataset.py --check-audio
 领域数据生成后的合理数量大致是：
 
 ```text
-data/tts：360 条 wav
-data/augmented：720 条 wav
-train：约 801 行
-valid：约 108 行
+data/tts_edge：360 条 wav
+data/augmented_edge：720 条 wav
+train：约 792 行
+valid：约 117 行
 test_domain：约 171 行
 ```
 
@@ -114,7 +123,7 @@ python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manife
 commands.txt                 # 领域指令文本，每行 category<TAB>text
 requirements-synthetic.txt   # 只用于合成数据的依赖
 requirements-train.txt       # Whisper/LoRA 训练依赖
-scripts/generate_command_catalog.py  # 生成约 120 条高质量领域输入
+scripts/generate_command_catalog.py  # 旧版可选脚本；只有加 --force 才会覆盖人工清单
 scripts/generate_tts.py      # TTS 合成
 scripts/augment_noise.py     # SNR 噪声增强
 scripts/build_manifest.py    # 生成训练/验证/测试 manifest
@@ -124,8 +133,8 @@ scripts/evaluate_whisper.py          # 微调前后评估
 scripts/merge_lora.py                # 可选：合并 LoRA adapter
 scripts/clean_generated_data.ps1     # 清理旧生成数据和训练输出
 data/noise/                  # 可选：放公开噪声 wav/flac/ogg
-data/tts/                    # TTS 干净音频输出
-data/augmented/              # 噪声增强音频输出
+data/tts_edge/               # 已入库的 Edge TTS 干净音频
+data/augmented_edge/         # 已入库的 10/20dB 噪声增强音频
 data/manifests/              # jsonl 元数据和切分结果
 ```
 
@@ -167,7 +176,7 @@ python scripts/generate_tts.py --engine sapi --list-sapi-voices
 
 ## 1. 编辑指令
 
-默认方案是约 120 条领域输入，质量优先：
+默认方案是 120 条人工策划领域输入，质量优先：
 
 ```text
 command: 55
@@ -176,13 +185,7 @@ fallback: 10
 short: 10
 ```
 
-重新生成：
-
-```powershell
-python scripts/generate_command_catalog.py
-```
-
-也可以手工修改 `commands.txt`。格式是：
+直接修改 `commands.txt`。格式是：
 
 ```text
 command	小飒小飒，帮我拿瓶可乐
@@ -205,8 +208,8 @@ python scripts/generate_tts.py --engine sapi --profiles sapi_slow,auto,-10% sapi
 如果你确认 `commands.txt` 可以发送给 Microsoft 在线 TTS 服务，可以使用 Edge TTS 三个人声配置，声音更自然：
 
 ```powershell
-python scripts/generate_tts.py --engine edge --default-edge-profiles --limit 3
-python scripts/generate_tts.py --engine edge --default-edge-profiles --quiet --overwrite
+python scripts/generate_tts.py --engine edge --default-edge-profiles --out-dir data\tts_edge --metadata data\manifests\tts_metadata.jsonl --limit 3
+python scripts/generate_tts.py --engine edge --default-edge-profiles --out-dir data\tts_edge --metadata data\manifests\tts_metadata.jsonl --quiet --overwrite
 ```
 
 查看本机可用 SAPI 声音：
@@ -220,7 +223,7 @@ python scripts/generate_tts.py --engine sapi --list-sapi-voices
 生成结果：
 
 ```text
-data/tts/*.wav
+data/tts_edge/*.wav
 data/manifests/tts_metadata.jsonl
 ```
 
@@ -229,19 +232,19 @@ data/manifests/tts_metadata.jsonl
 可以先不放任何噪声文件，脚本会生成类似会场的合成噪声：
 
 ```powershell
-python scripts/augment_noise.py
+python scripts/augment_noise.py --input data\manifests\tts_metadata.jsonl --out-dir data\augmented_edge --metadata data\manifests\augmented_metadata.jsonl
 ```
 
 如果你后来下载了 DEMAND/MUSAN 等公开噪声，把 wav/flac/ogg 放进 `data/noise/`，脚本会自动混用真实噪声：
 
 ```powershell
-python scripts/augment_noise.py --noise-dir data/noise
+python scripts/augment_noise.py --input data\manifests\tts_metadata.jsonl --out-dir data\augmented_edge --metadata data\manifests\augmented_metadata.jsonl --noise-dir data/noise
 ```
 
 默认生成 10/20 dB 两档：
 
 ```text
-data/augmented/*.wav
+data/augmented_edge/*.wav
 data/manifests/augmented_metadata.jsonl
 ```
 
@@ -266,9 +269,9 @@ data/manifests/test_short.jsonl
 切分按类别分层后再按 `source_id` 做，保证同一句指令的干净版和所有噪声增强版不会同时出现在训练集和测试集里。默认 `valid=10%`、`test=15%`，所以 120 条文本大约会切成：
 
 ```text
-train：约 90 条唯一领域输入
-valid：约 12 条唯一领域输入
-test_domain：约 18 条唯一领域输入
+train：约 88 条唯一领域输入
+valid：约 13 条唯一领域输入
+test_domain：约 19 条唯一领域输入
 ```
 
 `test_domain_clean` 和 `test_domain_noisy` 用来分别比较安静和噪声场景，`test_keywords` 用来重点看 “飒智”“小飒”“WAIC”“Sage Robot One”“Sage Dog” 等专名，`test_short` 用来看短指令。

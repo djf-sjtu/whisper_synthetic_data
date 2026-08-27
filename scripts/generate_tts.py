@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -20,7 +21,7 @@ EDGE_VOICES = [
 
 DEFAULT_EDGE_PROFILES = [
     ("xiaoxiao_slow", "zh-CN-XiaoxiaoNeural", "-10%"),
-    ("yunxi_normal", "zh-CN-YunxiNeural", "+0%"),
+    ("xiaoyi_normal", "zh-CN-XiaoyiNeural", "+0%"),
     ("yunyang_fast", "zh-CN-YunyangNeural", "+10%"),
 ]
 
@@ -175,7 +176,7 @@ $synth.Dispose()
                 pass
 
 
-def run_edge(text: str, out_path: Path, voice: str, rate: str):
+def run_edge(text: str, out_path: Path, voice: str, rate: str, retries: int = 10, timeout: int = 120):
     mp3_path = out_path.with_suffix(".edge.mp3")
     cmd = [
         sys.executable,
@@ -189,12 +190,25 @@ def run_edge(text: str, out_path: Path, voice: str, rate: str):
         "--write-media",
         str(mp3_path),
     ]
-    try:
-        subprocess.run(cmd, check=True)
-        convert_to_wav_16k(mp3_path, out_path)
-    finally:
+    last_error = None
+    for attempt in range(1, retries + 1):
         if mp3_path.exists():
             mp3_path.unlink()
+        try:
+            subprocess.run(cmd, check=True, timeout=timeout)
+            if not mp3_path.exists() or mp3_path.stat().st_size == 0:
+                raise RuntimeError(f"Edge TTS wrote an empty file: {mp3_path}")
+            convert_to_wav_16k(mp3_path, out_path)
+            return
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            last_error = exc
+            if attempt < retries:
+                print(f"Edge TTS failed for {voice} {rate}; retry {attempt}/{retries}: {exc}")
+                time.sleep(min(30, 3 * attempt))
+        finally:
+            if mp3_path.exists():
+                mp3_path.unlink()
+    raise RuntimeError(f"Edge TTS failed after {retries} attempts for text: {text}") from last_error
 
 
 def convert_to_wav_16k(input_path: Path, out_path: Path):

@@ -60,6 +60,14 @@ lightning_logs/
 *.7z
 *.rar
 
+# Versioned synthetic dataset generated from the curated commands.txt.
+!data/manifests/
+!data/manifests/*.jsonl
+data/manifests/tts_*_*.jsonl
+!data/tts_edge/
+!data/tts_edge/*.wav
+!data/augmented_edge/
+!data/augmented_edge/*.wav
 
 # Hugging Face / dataset caches
 .cache/

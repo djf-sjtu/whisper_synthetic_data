@@ -1,7 +1,11 @@
+import argparse
 import random
 from collections import Counter, OrderedDict
 from pathlib import Path
 
+
+# Legacy helper. The project now keeps commands.txt as a manually curated list.
+# Running this script will overwrite that list, so use it only for experiments.
 
 TARGET_COUNTS = {
     "command": 55,
@@ -520,6 +524,18 @@ def write_commands(rows):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Legacy helper for regenerating commands.txt.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the manually curated commands.txt file.",
+    )
+    args = parser.parse_args()
+    if not args.force:
+        raise SystemExit(
+            "commands.txt is manually curated now. Re-run with --force only if you intentionally want to overwrite it."
+        )
+
     rows = {category: OrderedDict() for category in TARGET_COUNTS}
     build_command(rows)
     build_qa(rows)
