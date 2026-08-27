@@ -41,7 +41,17 @@ data/augmented_edge：720 条 10/20dB 噪声增强 wav
 data/manifests：训练、验证、测试 jsonl
 ```
 
-所以服务器上正常不用重新生成 TTS，也不用重新准备 AISHELL，安装依赖后可以直接从 “微调前 baseline” 开始。
+本仓库也已经包含 AISHELL-1 抽样数据：`data/aishell_sample/train` 1000 条、`data/aishell_sample/test` 100 条。服务器上正常不用重新生成 TTS，也不用重新准备 AISHELL，安装依赖后可以直接从 “微调前 baseline” 开始。
+
+当前数据规模：
+
+```text
+领域 synthetic 全量：1080 条，约 0.69 小时
+AISHELL train：1000 条，约 1.24 小时
+AISHELL test：100 条，约 0.12 小时
+仓库总音频：2180 条，约 2.05 小时
+首轮实际训练：领域 train 792 条 + AISHELL 250 条，约 0.81 小时
+```
 
 如果以后改了 `commands.txt`，才需要重新生成领域数据。`commands.txt` 是人工策划的 120 条领域文本，正常不要运行旧生成脚本。Edge TTS 不需要登录，但会把 `commands.txt` 文本发送给 Microsoft 在线 TTS：
 
@@ -71,7 +81,7 @@ valid：约 117 行
 test_domain：约 171 行
 ```
 
-仓库已经包含 AISHELL-1 抽样数据：`data/aishell_sample/train` 1000 条、`data/aishell_sample/test` 100 条。首轮训练只从 1000 条训练池里抽 250 条混入，避免 AISHELL 压过领域指令。
+首轮训练只从 1000 条 AISHELL 训练池里抽 250 条混入，避免 AISHELL 压过领域指令。
 
 先跑微调前 baseline：
 
@@ -294,6 +304,8 @@ data/manifests/test_general_aishell_100.jsonl
 ```text
 领域 train：约 75%-80%
 AISHELL：约 20%-25%
+AISHELL train 1000：约 1.24 小时
+AISHELL test 100：约 0.12 小时
 ```
 
 ## 7. 微调前 baseline
