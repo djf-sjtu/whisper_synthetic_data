@@ -144,6 +144,8 @@ python scripts/evaluate_whisper.py --adapter outputs/whisper-small-lora --manife
 
 对比 `eval_outputs/*_summary.csv`。如果 `lora_keywords` 明显变好，同时 `lora_general_aishell` 没明显变差，这轮就算有效。
 
+注意：Whisper multilingual 的中文输出可能混用简体和繁体。评估脚本默认会先把预测和参考文本都转成简体再计算 `cer`、`exact_match` 和关键词召回；同时也会输出 `cer_raw`、`exact_match_raw`，用于查看不做简繁归一化时的原始差异。`*_predictions.jsonl` 里保留 `prediction` 原文，并额外写入 `prediction_simplified`。
+
 ## 目录
 
 ```text
@@ -342,6 +344,8 @@ python scripts/evaluate_whisper.py --manifest data/manifests/test_short.jsonl --
 python scripts/evaluate_whisper.py --manifest data/manifests/test_general_aishell_100.jsonl --name base_general_aishell
 ```
 
+Whisper 可能输出繁体中文，评估脚本默认会做繁体转简体后再计算主指标。看 `cer` 判断识别质量，看 `cer_raw` 判断简繁差异对结果影响有多大。
+
 ## 8. LoRA 微调
 
 RTX 4090 24GB 推荐先用这个配置：
@@ -416,6 +420,8 @@ exact_match 是否上升
 keyword_recall/WAIC、keyword_recall/Sage Robot One、keyword_recall/Sage Dog 是否上升
 general_aishell 的 CER 是否明显变差
 ```
+
+其中 `cer` 和 `exact_match` 默认已经做了简繁归一化；`cer_raw` 和 `exact_match_raw` 是原始输出直接比较。上线做指令识别时也建议先把 Whisper 输出转成简体，再进入后续关键词或意图匹配。
 
 ## 10. 合并 LoRA
 

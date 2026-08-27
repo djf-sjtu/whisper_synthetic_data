@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torch
+from opencc import OpenCC
 from peft import PeftModel
 from scipy import signal
 from tqdm import tqdm
@@ -17,6 +18,7 @@ from transformers import WhisperForConditionalGeneration, WhisperProcessor
 TARGET_SR = 16000
 KEYWORDS = ["小飒", "飒智", "WAIC", "Sage Robot One", "Sage Dog", "飒智智能科技有限公司"]
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SIMPLIFIER = OpenCC("t2s")
 
 
 def read_jsonl(path: Path):
@@ -37,11 +39,12 @@ def load_audio(path: Path):
     return audio
 
 
-def normalize_text(text: str):
+def normalize_text(text: str, simplify_chinese: bool = True):
     text = text.strip()
-    text = text.replace(" ", "")
-    text = text.replace("，", "").replace("。", "").replace("？", "").replace("！", "")
-    text = text.replace(",", "").replace(".", "").replace("?", "").replace("!", "")
+    if simplify_chinese:
+        text = SIMPLIFIER.convert(text)
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"[，。？！、；：,.?!;:]", "", text)
     return text.upper()
 
 
@@ -61,32 +64,45 @@ def edit_distance(left: str, right: str):
     return previous[-1]
 
 
-def keyword_stats(rows):
+def keyword_stats(rows, simplify_chinese: bool = True):
     stats = {}
     for keyword in KEYWORDS:
         refs = [row for row in rows if keyword in row["text"]]
         if not refs:
             continue
-        hits = [row for row in refs if normalize_text(keyword) in normalize_text(row["prediction"])]
+        hits = [
+            row
+            for row in refs
+            if normalize_text(keyword, simplify_chinese) in normalize_text(row["prediction"], simplify_chinese)
+        ]
         stats[keyword] = {"total": len(refs), "hit": len(hits), "recall": len(hits) / len(refs)}
     return stats
 
 
-def summarize(rows):
+def score_rows(rows, simplify_chinese: bool):
     total_edits = 0
     total_chars = 0
     exact = 0
     for row in rows:
-        ref = normalize_text(row["text"])
-        hyp = normalize_text(row["prediction"])
+        ref = normalize_text(row["text"], simplify_chinese)
+        hyp = normalize_text(row["prediction"], simplify_chinese)
         total_edits += edit_distance(ref, hyp)
         total_chars += max(1, len(ref))
         exact += int(ref == hyp)
+    return total_edits / total_chars if total_chars else 0.0, exact / len(rows) if rows else 0.0
+
+
+def summarize(rows, simplify_chinese: bool = True):
+    cer, exact = score_rows(rows, simplify_chinese=simplify_chinese)
+    cer_raw, exact_raw = score_rows(rows, simplify_chinese=False)
     return {
         "rows": len(rows),
-        "cer": total_edits / total_chars if total_chars else 0.0,
-        "exact_match": exact / len(rows) if rows else 0.0,
-        "keywords": keyword_stats(rows),
+        "cer": cer,
+        "exact_match": exact,
+        "cer_raw": cer_raw,
+        "exact_match_raw": exact_raw,
+        "simplified_metrics": simplify_chinese,
+        "keywords": keyword_stats(rows, simplify_chinese=simplify_chinese),
     }
 
 
@@ -122,6 +138,7 @@ def transcribe_rows(rows, processor, model, args):
         prediction = processor.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         result = dict(row)
         result["prediction"] = prediction
+        result["prediction_simplified"] = SIMPLIFIER.convert(prediction)
         output.append(result)
     return output
 
@@ -141,6 +158,9 @@ def write_summary(path: Path, summary):
         writer.writerow(["rows", summary["rows"]])
         writer.writerow(["cer", f"{summary['cer']:.6f}"])
         writer.writerow(["exact_match", f"{summary['exact_match']:.6f}"])
+        writer.writerow(["cer_raw", f"{summary['cer_raw']:.6f}"])
+        writer.writerow(["exact_match_raw", f"{summary['exact_match_raw']:.6f}"])
+        writer.writerow(["simplified_metrics", summary["simplified_metrics"]])
         for keyword, stat in summary["keywords"].items():
             writer.writerow([f"keyword_recall/{keyword}", f"{stat['recall']:.6f} ({stat['hit']}/{stat['total']})"])
 
@@ -157,12 +177,13 @@ def main():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--num-beams", type=int, default=1)
+    parser.add_argument("--no-simplify-chinese", action="store_true", help="Disable Traditional-to-Simplified normalization for metrics.")
     args = parser.parse_args()
 
     rows = read_jsonl(args.manifest)
     processor, model = load_model(args)
     results = transcribe_rows(rows, processor, model, args)
-    summary = summarize(results)
+    summary = summarize(results, simplify_chinese=not args.no_simplify_chinese)
 
     prediction_path = args.output_dir / f"{args.name}_predictions.jsonl"
     summary_path = args.output_dir / f"{args.name}_summary.csv"
