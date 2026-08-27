@@ -41,7 +41,7 @@ data/augmented_edge：720 条 10/20dB 噪声增强 wav
 data/manifests：训练、验证、测试 jsonl
 ```
 
-所以服务器上正常不用重新生成 TTS，安装依赖后可以直接从 “准备 AISHELL” 和 “微调前 baseline” 开始。
+所以服务器上正常不用重新生成 TTS，也不用重新准备 AISHELL，安装依赖后可以直接从 “微调前 baseline” 开始。
 
 如果以后改了 `commands.txt`，才需要重新生成领域数据。`commands.txt` 是人工策划的 120 条领域文本，正常不要运行旧生成脚本。Edge TTS 不需要登录，但会把 `commands.txt` 文本发送给 Microsoft 在线 TTS：
 
@@ -71,12 +71,7 @@ valid：约 117 行
 test_domain：约 171 行
 ```
 
-准备 AISHELL。建议准备 1000 条通用训练池和 100 条通用测试集，但首轮训练只从 1000 条里抽 250 条混入，避免 AISHELL 压过领域指令：
-
-```powershell
-python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split train --limit 1000 --out data/manifests/aishell_train_1000.jsonl
-python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split dev --limit 100 --out data/manifests/test_general_aishell_100.jsonl
-```
+仓库已经包含 AISHELL-1 抽样数据：`data/aishell_sample/train` 1000 条、`data/aishell_sample/test` 100 条。首轮训练只从 1000 条训练池里抽 250 条混入，避免 AISHELL 压过领域指令。
 
 先跑微调前 baseline：
 
@@ -135,6 +130,7 @@ scripts/clean_generated_data.ps1     # 清理旧生成数据和训练输出
 data/noise/                  # 可选：放公开噪声 wav/flac/ogg
 data/tts_edge/               # 已入库的 Edge TTS 干净音频
 data/augmented_edge/         # 已入库的 10/20dB 噪声增强音频
+data/aishell_sample/         # 已入库的 AISHELL-1 通用中文抽样音频
 data/manifests/              # jsonl 元数据和切分结果
 ```
 
@@ -282,23 +278,18 @@ test_domain：约 19 条唯一领域输入
 python scripts/audit_dataset.py --check-audio
 ```
 
-## 6. 抽样 AISHELL-1
+## 6. AISHELL-1 抽样数据
 
-把 AISHELL-1 解压到服务器后运行：
-
-```powershell
-python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split train --limit 1000 --out data/manifests/aishell_train_1000.jsonl
-python scripts/prepare_aishell_sample.py --aishell-root D:\datasets\data_aishell --split dev --limit 100 --out data/manifests/test_general_aishell_100.jsonl
-```
-
-输出：
+仓库已包含抽样好的 AISHELL-1 通用中文语音：
 
 ```text
+data/aishell_sample/train/*.wav
+data/aishell_sample/test/*.wav
 data/manifests/aishell_train_1000.jsonl
 data/manifests/test_general_aishell_100.jsonl
 ```
 
-训练时建议混合：
+其中 `aishell_train_1000.jsonl` 来自说话人 `S0002/S0003/S0004`，`test_general_aishell_100.jsonl` 来自独立说话人 `S0005`。训练时建议混合：
 
 ```text
 领域 train：约 75%-80%

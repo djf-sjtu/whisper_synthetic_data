@@ -68,6 +68,8 @@ data/manifests/tts_*_*.jsonl
 !data/tts_edge/*.wav
 !data/augmented_edge/
 !data/augmented_edge/*.wav
+!data/aishell_sample/
+!data/aishell_sample/**/*.wav
 
 # Hugging Face / dataset caches
 .cache/
