@@ -22,6 +22,7 @@ from transformers import (
 
 
 TARGET_SR = 16000
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_jsonl(path: Path):
@@ -35,6 +36,8 @@ def read_jsonl(path: Path):
 
 
 def load_audio(path: Path):
+    if not path.is_absolute():
+        path = REPO_ROOT / path
     audio, sr = sf.read(path, always_2d=False)
     if getattr(audio, "ndim", 1) > 1:
         audio = audio.mean(axis=1)
