@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import math
 import random
@@ -111,6 +112,59 @@ def print_trainable_parameters(model):
     print(f"trainable params: {trainable:,} / {total:,} ({percent:.4f}%)")
 
 
+def make_training_args(args):
+    kwargs = {
+        "output_dir": str(args.output_dir),
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "per_device_eval_batch_size": args.per_device_eval_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "learning_rate": args.learning_rate,
+        "warmup_steps": args.warmup_steps,
+        "num_train_epochs": args.num_train_epochs,
+        "eval_steps": args.eval_steps,
+        "save_strategy": "steps",
+        "save_steps": args.save_steps,
+        "save_total_limit": 3,
+        "logging_steps": args.logging_steps,
+        "predict_with_generate": False,
+        "generation_max_length": 64,
+        "fp16": args.fp16,
+        "bf16": args.bf16,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "report_to": ["tensorboard"],
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "eval_loss",
+        "greater_is_better": False,
+        "remove_unused_columns": False,
+        "label_names": ["labels"],
+    }
+
+    parameters = inspect.signature(Seq2SeqTrainingArguments.__init__).parameters
+    if "eval_strategy" in parameters:
+        kwargs["eval_strategy"] = "steps"
+    else:
+        kwargs["evaluation_strategy"] = "steps"
+    return Seq2SeqTrainingArguments(**kwargs)
+
+
+def make_trainer(training_args, model, train_dataset, valid_dataset, collator, processor, args):
+    kwargs = {
+        "args": training_args,
+        "model": model,
+        "train_dataset": train_dataset,
+        "eval_dataset": valid_dataset,
+        "data_collator": collator,
+        "callbacks": [EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience)],
+    }
+
+    parameters = inspect.signature(Seq2SeqTrainer.__init__).parameters
+    if "processing_class" in parameters:
+        kwargs["processing_class"] = processor.feature_extractor
+    else:
+        kwargs["tokenizer"] = processor.feature_extractor
+    return Seq2SeqTrainer(**kwargs)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune Whisper small with LoRA on jsonl manifests.")
     parser.add_argument("--model-name", default="openai/whisper-small")
@@ -179,42 +233,9 @@ def main():
     valid_dataset = ManifestSpeechDataset(valid_rows, processor)
     collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
-    training_args = Seq2SeqTrainingArguments(
-        output_dir=str(args.output_dir),
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        per_device_eval_batch_size=args.per_device_eval_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        learning_rate=args.learning_rate,
-        warmup_steps=args.warmup_steps,
-        num_train_epochs=args.num_train_epochs,
-        evaluation_strategy="steps",
-        eval_steps=args.eval_steps,
-        save_strategy="steps",
-        save_steps=args.save_steps,
-        save_total_limit=3,
-        logging_steps=args.logging_steps,
-        predict_with_generate=False,
-        generation_max_length=64,
-        fp16=args.fp16,
-        bf16=args.bf16,
-        gradient_checkpointing=args.gradient_checkpointing,
-        report_to=["tensorboard"],
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        remove_unused_columns=False,
-        label_names=["labels"],
-    )
+    training_args = make_training_args(args)
 
-    trainer = Seq2SeqTrainer(
-        args=training_args,
-        model=model,
-        train_dataset=train_dataset,
-        eval_dataset=valid_dataset,
-        data_collator=collator,
-        tokenizer=processor.feature_extractor,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience)],
-    )
+    trainer = make_trainer(training_args, model, train_dataset, valid_dataset, collator, processor, args)
     trainer.train()
     trainer.save_model(str(args.output_dir))
     processor.save_pretrained(str(args.output_dir))
