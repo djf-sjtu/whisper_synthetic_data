@@ -93,7 +93,29 @@ python scripts/evaluate_whisper.py --manifest data/manifests/test_short.jsonl --
 python scripts/evaluate_whisper.py --manifest data/manifests/test_general_aishell_100.jsonl --name base_general_aishell
 ```
 
-开始 LoRA 微调，8GB 显存先用这版：
+开始 LoRA 微调。RTX 4090 24GB 推荐先用这版：
+
+```powershell
+python scripts/train_whisper_lora.py `
+  --train-manifest data/manifests/train.jsonl `
+  --valid-manifest data/manifests/valid.jsonl `
+  --aishell-manifest data/manifests/aishell_train_1000.jsonl `
+  --max-aishell-rows 250 `
+  --output-dir outputs/whisper-small-lora `
+  --per-device-train-batch-size 16 `
+  --per-device-eval-batch-size 16 `
+  --gradient-accumulation-steps 1 `
+  --num-train-epochs 12 `
+  --learning-rate 1e-4 `
+  --warmup-steps 30 `
+  --eval-steps 50 `
+  --save-steps 50 `
+  --bf16
+```
+
+如果 `--bf16` 报错，改成 `--fp16`。如果显存不足，把 `--per-device-train-batch-size` 改成 8，并加上 `--gradient-accumulation-steps 2`，等效 batch 仍然是 16。
+
+8GB 显存用这版：
 
 ```powershell
 python scripts/train_whisper_lora.py `
@@ -322,7 +344,42 @@ python scripts/evaluate_whisper.py --manifest data/manifests/test_general_aishel
 
 ## 8. LoRA 微调
 
-8GB 显存可以先用这个配置：
+RTX 4090 24GB 推荐先用这个配置：
+
+```powershell
+python scripts/train_whisper_lora.py `
+  --train-manifest data/manifests/train.jsonl `
+  --valid-manifest data/manifests/valid.jsonl `
+  --aishell-manifest data/manifests/aishell_train_1000.jsonl `
+  --max-aishell-rows 250 `
+  --output-dir outputs/whisper-small-lora `
+  --per-device-train-batch-size 16 `
+  --per-device-eval-batch-size 16 `
+  --gradient-accumulation-steps 1 `
+  --num-train-epochs 12 `
+  --learning-rate 1e-4 `
+  --warmup-steps 30 `
+  --eval-steps 50 `
+  --save-steps 50 `
+  --bf16
+```
+
+这组参数的含义：
+
+```text
+per-device-train-batch-size 16：4090 显存够，直接吃 16 条，训练更快。
+gradient-accumulation-steps 1：不再累积梯度；有效 batch = 16。
+num-train-epochs 12：数据少，最多跑 12 轮；脚本会按 valid loss 早停。
+learning-rate 1e-4：LoRA 常用起点，适合小规模领域适配。
+warmup-steps 30：前 30 步慢慢升学习率，减少一开始震荡。
+eval/save-steps 50：约每 0.75 个 epoch 验证和保存一次，方便早停选最好 checkpoint。
+bf16：4090 支持，通常比 fp16 更稳。
+max-aishell-rows 250：只混入约 25% AISHELL，防止通用语音压过领域指令。
+```
+
+如果 `--bf16` 报错，改成 `--fp16`。如果显存不足，把 `--per-device-train-batch-size` 改成 8，并加上 `--gradient-accumulation-steps 2`，等效 batch 仍然是 16。
+
+8GB 显存可以用这个配置：
 
 ```powershell
 python scripts/train_whisper_lora.py `
@@ -339,7 +396,7 @@ python scripts/train_whisper_lora.py `
   --gradient-checkpointing
 ```
 
-12GB 或 16GB 显存可以把 `--per-device-train-batch-size` 调到 4。
+12GB 或 16GB 显存可以把 `--per-device-train-batch-size` 调到 4 或 8。
 
 ## 9. 微调后评估
 
